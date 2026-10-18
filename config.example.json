@@ -1,0 +1,18 @@
+{
+  "vaultwarden_url": "https://vaultwarden.example.com",
+  "organization_id": "",
+  "collection_id": "",
+  "rp_id": "vaultbroker.example.com",
+  "webauthn_user": "owner",
+  "rp_origin": "https://vaultbroker.example.com:8446",
+  "web_addr": "127.0.0.1:8799",
+  "socket_path": "/run/vaultbroker/broker.sock",
+  "helper_url": "http://127.0.0.1:8795",
+  "helper_token": "replace-with-random-token",
+  "audit_path": "/var/lib/vaultbroker/audit.log",
+  "credential_path": "/var/lib/vaultbroker/credential.json",
+  "scope_path": "/var/lib/vaultbroker/scope.json",
+  "register_token_path": "/var/lib/vaultbroker/register-token",
+  "bw_path": "/usr/bin/bw",
+  "allowed_uids": [1000]
+}

@@ -1,0 +1,6 @@
+.devenv/
+.devenv.flake.nix
+/vaultbroker
+__pycache__/
+/bw
+/decisions.tsv
