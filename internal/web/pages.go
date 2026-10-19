@@ -110,7 +110,7 @@ document.getElementById('login').onclick=async()=>{try{
 <p>Vault: <strong>{{.Status.Vault}}</strong>{{if not .Status.Configured}} (scope pin pending){{end}}</p>
 {{if eq .Status.Vault "locked"}}<p><a href="/unlock">Unlock the vault</a></p>{{end}}
 <h2>Pending approvals ({{len .Pending}})</h2>
-{{range .Pending}}<p><a href="/approve/{{.ID}}">{{.Fill.ItemName}}</a> <span class="muted">into session {{.Fill.Session}}, expires {{.ExpiresAt.Format "15:04:05"}}</span></p>
+{{range .Pending}}<p><a href="/approve/{{.ID}}">{{.SubjectItemName}}</a> <span class="muted">{{.Kind}} into session {{.SubjectSession}}, expires {{.ExpiresAt.Format "15:04:05"}}</span></p>
 {{else}}<p class="muted">None.</p>{{end}}
 <form method="post" action="/logout"><button type="submit">Log out</button></form>
 {{end}}`))
@@ -156,20 +156,22 @@ keeps the session token in memory only, until reboot or lock.</p>
 <p><a href="/">Back</a></p>`))
 
 var approveTemplate = template.Must(template.New("approve").Parse(`<!doctype html>
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Approve fill</title>` + pageStyle + `
-<h1>Approve browser fill</h1>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Approve request</title>` + pageStyle + `
+{{if eq .Request.Kind "passkey"}}<h1>Approve passkey login</h1>{{else}}<h1>Approve browser fill</h1>{{end}}
 {{with .Request}}
 <table>
-<tr><th>Item</th><td>{{.Fill.ItemName}} <span class="muted">({{.Fill.ItemID}})</span></td></tr>
-<tr><th>Browser session</th><td>{{.Fill.Session}}</td></tr>
-<tr><th>Page origin</th><td><code>{{.Fill.Origin}}</code></td></tr>
-<tr><th>Item URIs</th><td>{{range .Fill.ItemURIs}}<code>{{.}}</code><br>{{else}}<span class="muted">none stored</span>{{end}}</td></tr>
+<tr><th>Item</th><td>{{.SubjectItemName}} <span class="muted">({{.SubjectItemID}})</span></td></tr>
+<tr><th>Browser session</th><td>{{.SubjectSession}}</td></tr>
+<tr><th>Page origin</th><td><code>{{.SubjectOrigin}}</code></td></tr>
+<tr><th>Item URIs</th><td>{{range .SubjectURIs}}<code>{{.}}</code><br>{{else}}<span class="muted">none stored</span>{{end}}</td></tr>
+{{if eq .Kind "passkey"}}<tr><th>Passkey RP ID</th><td><code>{{.Passkey.RPID}}</code></td></tr>
+<tr><th>Login control</th><td><code>{{if .Passkey.Trigger.Selector}}{{.Passkey.Trigger.Selector}}{{else}}@{{.Passkey.Trigger.Ref}}{{end}}</code></td></tr>{{end}}
 <tr><th>State</th><td id="state">{{.State}}</td></tr>
 <tr><th>Expires</th><td>{{.ExpiresAt.Format "15:04:05"}}</td></tr>
 <tr><th>Request hash</th><td><code>{{.Hash}}</code></td></tr>
 </table>
-<h2>Fields</h2>
-<table>{{range .Fill.Fields}}<tr><td>{{.Field}}</td><td>→</td><td><code>{{if .Selector}}{{.Selector}}{{else}}@{{.Ref}}{{end}}</code></td></tr>{{end}}</table>
+{{if eq .Kind "fill"}}<h2>Fields</h2>
+<table>{{range .Fill.Fields}}<tr><td>{{.Field}}</td><td>→</td><td><code>{{if .Selector}}{{.Selector}}{{else}}@{{.Ref}}{{end}}</code></td></tr>{{end}}</table>{{end}}
 {{end}}
 {{if .Mismatch}}<p class="warn">Warning: the page origin host matches none of the item's stored URIs.</p>{{end}}
 <p class="warn" id="err" style="display:none"></p>

@@ -56,6 +56,7 @@ func (b *Broker) CreateFill(ctx context.Context, in FillParams) (Request, error)
 	now := time.Now()
 	req := &Request{
 		ID:        newRequestID(),
+		Kind:      KindFill,
 		State:     Pending,
 		CreatedAt: now,
 		ExpiresAt: now.Add(ApprovalWindow),
@@ -67,7 +68,7 @@ func (b *Broker) CreateFill(ctx context.Context, in FillParams) (Request, error)
 	b.requests[req.ID] = req
 	b.mu.Unlock()
 
-	b.auditFill("request.created", req, "pending")
+	b.auditRequest("request.created", req, "pending")
 	go b.notifyApproval(req)
 	return *req, nil
 }
@@ -79,8 +80,12 @@ func (b *Broker) ApprovalURL(req Request) string {
 func (b *Broker) notifyApproval(req *Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	msg := fmt.Sprintf("Vaultbroker: approve filling %q into browser session %q at %s within 5 minutes:\n%s",
-		req.Fill.ItemName, req.Fill.Session, req.Fill.Origin, b.ApprovalURL(*req))
+	verb := "filling"
+	if req.Kind == KindPasskey {
+		verb = "a passkey login with"
+	}
+	msg := fmt.Sprintf("Vaultbroker: approve %s %q into browser session %q at %s within 5 minutes:\n%s",
+		verb, req.SubjectItemName(), req.SubjectSession(), req.SubjectOrigin(), b.ApprovalURL(*req))
 	outcome := "sent"
 	if err := b.helper.Notify(ctx, msg); err != nil {
 		outcome = "failed"
@@ -88,8 +93,8 @@ func (b *Broker) notifyApproval(req *Request) {
 	b.audit.Write(AuditEvent{Event: "request.notify", RequestID: req.ID, Outcome: outcome})
 }
 
-// ExecuteApproved runs one approved fill. Secret values exist only in
-// this call: from bw into helper assignments, then gone.
+// ExecuteApproved runs one approved request. Secret values exist
+// only in this call: from bw into the helper, then gone.
 func (b *Broker) ExecuteApproved(ctx context.Context, id string) {
 	b.mu.Lock()
 	req, ok := b.requests[id]
@@ -101,11 +106,26 @@ func (b *Broker) ExecuteApproved(ctx context.Context, id string) {
 		b.mu.Unlock()
 		return
 	}
+	kind := req.Kind
 	fill := req.Fill
+	var passkey *PasskeyParams
+	if req.Passkey != nil {
+		p := *req.Passkey
+		passkey = &p
+	}
 	b.mu.Unlock()
 
+	if kind == KindPasskey {
+		if passkey == nil {
+			b.finishPasskey(req, nil, fmt.Errorf("passkey request is missing its parameters"))
+			return
+		}
+		result, err := b.executePasskey(ctx, *passkey)
+		b.finishPasskey(req, result, err)
+		return
+	}
 	result, err := b.executeFill(ctx, fill)
-	b.finish(req, result, err)
+	b.finishFill(req, result, err)
 }
 
 func (b *Broker) executeFill(ctx context.Context, fill FillParams) (*FillResult, error) {
@@ -178,15 +198,23 @@ func (b *Broker) executeFill(ctx context.Context, fill FillParams) (*FillResult,
 // agent can read. The helper already returns generic fill errors; this is
 // the broker-side backstop for anything that echoes its inputs.
 func scrubValues(text string, assignments []helper.FillAssignment) string {
-	for _, a := range assignments {
-		if a.Value != "" {
-			text = strings.ReplaceAll(text, a.Value, "***")
+	values := make([]string, len(assignments))
+	for i, a := range assignments {
+		values[i] = a.Value
+	}
+	return scrubSecrets(text, values...)
+}
+
+func scrubSecrets(text string, secrets ...string) string {
+	for _, secret := range secrets {
+		if secret != "" {
+			text = strings.ReplaceAll(text, secret, "***")
 		}
 	}
 	return text
 }
 
-func (b *Broker) finish(req *Request, result *FillResult, err error) {
+func (b *Broker) finishFill(req *Request, result *FillResult, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	req.Result = result
@@ -204,7 +232,7 @@ func (b *Broker) finish(req *Request, result *FillResult, err error) {
 		}
 	}
 	_ = b.transition(req, to)
-	b.auditFillLocked("request.executed", req, string(to))
+	b.auditRequestLocked("request.executed", req, string(to))
 }
 
 // Wait blocks until the request reaches a terminal state or ctx ends.
@@ -229,23 +257,27 @@ func (b *Broker) Wait(ctx context.Context, id string) (Request, error) {
 	}
 }
 
-func (b *Broker) auditFill(event string, req *Request, outcome string) {
+func (b *Broker) auditRequest(event string, req *Request, outcome string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.auditFillLocked(event, req, outcome)
+	b.auditRequestLocked(event, req, outcome)
 }
 
-func (b *Broker) auditFillLocked(event string, req *Request, outcome string) {
-	fields := make([]string, len(req.Fill.Fields))
-	for i, f := range req.Fill.Fields {
-		fields[i] = f.Field
-	}
-	b.audit.Write(AuditEvent{
-		Event: event, RequestID: req.ID,
-		ItemID: req.Fill.ItemID, ItemName: req.Fill.ItemName,
-		Fields: fields, Session: req.Fill.Session, Origin: req.Fill.Origin,
+func (b *Broker) auditRequestLocked(event string, req *Request, outcome string) {
+	e := AuditEvent{
+		Event: event, RequestID: req.ID, Kind: string(req.Kind),
+		ItemID: req.SubjectItemID(), ItemName: req.SubjectItemName(),
+		Session: req.SubjectSession(), Origin: req.SubjectOrigin(),
 		Outcome: outcome,
-	})
+	}
+	if req.Kind == KindPasskey && req.Passkey != nil {
+		e.RPID = req.Passkey.RPID
+	} else {
+		for _, f := range req.Fill.Fields {
+			e.Fields = append(e.Fields, f.Field)
+		}
+	}
+	b.audit.Write(e)
 }
 
 func newRequestID() string {
@@ -258,12 +290,18 @@ func newRequestID() string {
 
 // requestHash binds the approval to the exact request the page displays.
 func requestHash(req *Request) string {
-	canonical, _ := json.Marshal(struct {
-		ItemID  string      `json:"item_id"`
-		Session string      `json:"session"`
-		Origin  string      `json:"origin"`
-		Fields  []FillField `json:"fields"`
-	}{req.Fill.ItemID, req.Fill.Session, req.Fill.Origin, req.Fill.Fields})
+	canon := struct {
+		Kind    RequestKind    `json:"kind"`
+		Fill    *FillParams    `json:"fill,omitempty"`
+		Passkey *PasskeyParams `json:"passkey,omitempty"`
+	}{Kind: req.Kind}
+	if req.Kind == KindPasskey {
+		canon.Passkey = req.Passkey
+	} else {
+		fill := req.Fill
+		canon.Fill = &fill
+	}
+	canonical, _ := json.Marshal(canon)
 	sum := sha256.Sum256(canonical)
 	return hex.EncodeToString(sum[:])
 }

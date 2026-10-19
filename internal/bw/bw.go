@@ -58,6 +58,8 @@ type ItemMeta struct {
 	HasUsername    bool     `json:"has_username"`
 	HasPassword    bool     `json:"has_password"`
 	HasTOTP        bool     `json:"has_totp"`
+	HasPasskey     bool     `json:"has_passkey"`
+	PasskeyRPIDs   []string `json:"passkey_rp_ids"`
 	CustomFields   []string `json:"custom_fields"`
 }
 
@@ -77,10 +79,11 @@ type rawItem struct {
 	Name           string   `json:"name"`
 	Type           int      `json:"type"`
 	Login          *struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		TOTP     string `json:"totp"`
-		URIs     []struct {
+		Username         string               `json:"username"`
+		Password         string               `json:"password"`
+		TOTP             string               `json:"totp"`
+		Fido2Credentials []rawFido2Credential `json:"fido2Credentials"`
+		URIs             []struct {
 			URI string `json:"uri"`
 		} `json:"uris"`
 	} `json:"login"`
@@ -225,8 +228,13 @@ func metaOf(item rawItem) ItemMeta {
 		HasUsername:    item.Login.Username != "",
 		HasPassword:    item.Login.Password != "",
 		HasTOTP:        item.Login.TOTP != "",
+		HasPasskey:     len(item.Login.Fido2Credentials) > 0,
+		PasskeyRPIDs:   []string{},
 		URIs:           []string{},
 		CustomFields:   []string{},
+	}
+	for _, cred := range item.Login.Fido2Credentials {
+		meta.PasskeyRPIDs = append(meta.PasskeyRPIDs, cred.RPID)
 	}
 	for _, uri := range item.Login.URIs {
 		meta.URIs = append(meta.URIs, uri.URI)

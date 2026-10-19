@@ -14,6 +14,8 @@ type AuditEvent struct {
 	Time      time.Time `json:"time"`
 	Event     string    `json:"event"`
 	RequestID string    `json:"request_id,omitempty"`
+	Kind      string    `json:"kind,omitempty"`
+	RPID      string    `json:"rp_id,omitempty"`
 	ItemID    string    `json:"item_id,omitempty"`
 	ItemName  string    `json:"item_name,omitempty"`
 	Fields    []string  `json:"fields,omitempty"`

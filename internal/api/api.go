@@ -16,14 +16,15 @@ import (
 )
 
 const (
-	MethodStatus       = "status"
-	MethodSearch       = "search"
-	MethodLock         = "lock"
-	MethodFillCreate   = "fill.create"
-	MethodRequestGet   = "request.get"
-	MethodRequestWait  = "request.wait"
-	MethodWaitUnlocked = "vault.wait_unlocked"
-	MethodDiscover     = "discover" // provisioning only; refuses once configured
+	MethodStatus        = "status"
+	MethodSearch        = "search"
+	MethodLock          = "lock"
+	MethodFillCreate    = "fill.create"
+	MethodPasskeyCreate = "passkey.create"
+	MethodRequestGet    = "request.get"
+	MethodRequestWait   = "request.wait"
+	MethodWaitUnlocked  = "vault.wait_unlocked"
+	MethodDiscover      = "discover" // provisioning only; refuses once configured
 )
 
 type Request struct {
@@ -108,7 +109,7 @@ type requestParams struct {
 	ID string `json:"id"`
 }
 
-type fillCreated struct {
+type requestCreated struct {
 	RequestID   string    `json:"request_id"`
 	State       string    `json:"state"`
 	ApprovalURL string    `json:"approval_url"`
@@ -152,7 +153,22 @@ func (s *Server) dispatch(ctx context.Context, req Request) Response {
 		if err != nil {
 			return Response{Error: err.Error()}
 		}
-		return ok(fillCreated{
+		return ok(requestCreated{
+			RequestID:   created.ID,
+			State:       string(created.State),
+			ApprovalURL: s.broker.ApprovalURL(created),
+			ExpiresAt:   created.ExpiresAt,
+		})
+	case MethodPasskeyCreate:
+		var params broker.PasskeyParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return Response{Error: "passkey.create: bad params"}
+		}
+		created, err := s.broker.CreatePasskey(ctx, params)
+		if err != nil {
+			return Response{Error: err.Error()}
+		}
+		return ok(requestCreated{
 			RequestID:   created.ID,
 			State:       string(created.State),
 			ApprovalURL: s.broker.ApprovalURL(created),

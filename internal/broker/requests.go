@@ -12,8 +12,8 @@ func (b *Broker) expireLocked(req *Request) {
 	if req.State == Pending && time.Now().After(req.ExpiresAt) {
 		if err := b.transition(req, Expired); err == nil {
 			b.audit.Write(AuditEvent{
-				Event: "request.expired", RequestID: req.ID,
-				ItemID: req.Fill.ItemID, ItemName: req.Fill.ItemName, Outcome: "expired",
+				Event: "request.expired", RequestID: req.ID, Kind: string(req.Kind),
+				ItemID: req.SubjectItemID(), ItemName: req.SubjectItemName(), Outcome: "expired",
 			})
 		}
 	}
@@ -64,7 +64,7 @@ func (b *Broker) Decide(id string, approve bool) (Request, error) {
 	if err := b.transition(req, to); err != nil {
 		return *req, err
 	}
-	b.auditFillLocked(event, req, string(to))
+	b.auditRequestLocked(event, req, string(to))
 	return *req, nil
 }
 

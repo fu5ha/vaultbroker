@@ -71,8 +71,23 @@ TOOLS = [
         },
     },
     {
+        "name": "vault_passkey_login",
+        "description": "Ask the owner to approve a passkey login with one vault item (see has_passkey in vault_search) into a named agent-browser session in the helpers container. Open the login page in that session first. Name the control that starts the site's passkey ceremony with a CSS selector or accessibility ref; the broker's helper clicks it, answers the ceremony with the item's passkey, and removes the credential before you regain control. Returns a request id and the approval link; collect the outcome with vault_result. Pass notifySession (your pi-notify-agent session id) to get woken when the request settles.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "item": {"type": "string", "description": "Item id from vault_search."},
+                "session": {"type": "string", "description": "agent-browser session name (the service name)."},
+                "selector": {"type": "string", "description": "CSS selector of the passkey login control."},
+                "ref": {"type": "string", "description": "Accessibility ref of the passkey login control."},
+                "notifySession": {"type": "string"},
+            },
+            "required": ["item", "session"],
+        },
+    },
+    {
         "name": "vault_result",
-        "description": "Collect the outcome of a finished vault request: approved/denied/expired and per-field fill success. Never returns secret values.",
+        "description": "Collect the outcome of a finished vault request: approved/denied/expired, per-field fill success or the passkey ceremony RP id. Never returns secret values.",
         "inputSchema": {
             "type": "object",
             "properties": {"request_id": {"type": "string"}},
@@ -173,6 +188,27 @@ def wait_and_notify(request_id, notify_session):
         pass
 
 
+def create_request(method, params, args):
+    """Create one broker approval request and arm the settle wake-up."""
+    notify_session = args.get("notifySession") or ""
+    if notify_session:
+        params["notify_session"] = notify_session
+    try:
+        created = broker_call(method, params)
+    except RuntimeError as exc:
+        if "locked" in str(exc) and arm_unlock_watch(notify_session):
+            raise RuntimeError(f"{exc}; a wake-up is armed for when the vault unlocks") from exc
+        raise
+    if notify_session and SESSION_ID_RE.match(notify_session):
+        threading.Thread(
+            target=wait_and_notify,
+            args=(created["request_id"], notify_session),
+            daemon=True,
+        ).start()
+        created["notification"] = "pi-notify-agent wake-up armed for this session"
+    return created
+
+
 def tool_call(name, args):
     if name == "vault_search":
         return broker_call("search", {"query": args.get("query", "")})
@@ -193,23 +229,15 @@ def tool_call(name, args):
                 for f in args.get("fields") or []
             ],
         }
-        notify_session = args.get("notifySession") or ""
-        if notify_session:
-            params["notify_session"] = notify_session
-        try:
-            created = broker_call("fill.create", params)
-        except RuntimeError as exc:
-            if "locked" in str(exc) and arm_unlock_watch(notify_session):
-                raise RuntimeError(f"{exc}; a wake-up is armed for when the vault unlocks") from exc
-            raise
-        if notify_session and SESSION_ID_RE.match(notify_session):
-            threading.Thread(
-                target=wait_and_notify,
-                args=(created["request_id"], notify_session),
-                daemon=True,
-            ).start()
-            created["notification"] = "pi-notify-agent wake-up armed for this session"
-        return created
+        return create_request("fill.create", params, args)
+    if name == "vault_passkey_login":
+        trigger = {k: args[k] for k in ("selector", "ref") if args.get(k)}
+        params = {
+            "item_id": args.get("item", ""),
+            "session": args.get("session", ""),
+            "trigger": trigger,
+        }
+        return create_request("passkey.create", params, args)
     if name == "vault_result":
         return broker_call("request.get", {"id": args.get("request_id", "")})
     raise RuntimeError(f"unknown tool {name}")

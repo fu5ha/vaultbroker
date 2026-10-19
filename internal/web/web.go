@@ -162,7 +162,7 @@ func (s *Server) approvePage(w http.ResponseWriter, r *http.Request) {
 	}
 	render(w, approveTemplate, approveData{
 		CSRF: sess.csrf, Request: req,
-		Mismatch: originMismatch(req.Fill.Origin, req.Fill.ItemURIs),
+		Mismatch: originMismatch(req.SubjectOrigin(), req.SubjectURIs()),
 	})
 }
 

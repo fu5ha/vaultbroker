@@ -80,15 +80,85 @@ type FillResult struct {
 	Fields []FieldResult `json:"fields"`
 }
 
+type RequestKind string
+
+const (
+	KindFill    RequestKind = "fill"
+	KindPasskey RequestKind = "passkey"
+)
+
+// A Trigger names the page control that starts a passkey ceremony.
+// The helper clicks it; the agent never drives the ceremony.
+type Trigger struct {
+	Selector string `json:"selector,omitempty"`
+	Ref      string `json:"ref,omitempty"`
+}
+
+// What the agent asks to log in with a passkey, and where. RPID is
+// broker-resolved from the item's stored passkey and the page's
+// current host, like a fill's origin.
+type PasskeyParams struct {
+	ItemID        string   `json:"item_id"`
+	ItemName      string   `json:"item_name"`
+	ItemURIs      []string `json:"item_uris"`
+	Session       string   `json:"session"`
+	Origin        string   `json:"origin"`
+	RPID          string   `json:"rp_id"`
+	Trigger       Trigger  `json:"trigger"`
+	NotifySession string   `json:"notify_session,omitempty"`
+}
+
+type PasskeyResult struct {
+	CeremonyRPID string `json:"ceremony_rp_id"`
+}
+
 type Request struct {
-	ID        string       `json:"id"`
-	State     RequestState `json:"state"`
-	CreatedAt time.Time    `json:"created_at"`
-	ExpiresAt time.Time    `json:"expires_at"`
-	Hash      string       `json:"hash"`
-	Fill      FillParams   `json:"fill"`
-	Result    *FillResult  `json:"result,omitempty"`
-	Error     string       `json:"error,omitempty"`
+	ID            string         `json:"id"`
+	Kind          RequestKind    `json:"kind"`
+	State         RequestState   `json:"state"`
+	CreatedAt     time.Time      `json:"created_at"`
+	ExpiresAt     time.Time      `json:"expires_at"`
+	Hash          string         `json:"hash"`
+	Fill          FillParams     `json:"fill"`
+	Passkey       *PasskeyParams `json:"passkey,omitempty"`
+	Result        *FillResult    `json:"result,omitempty"`
+	PasskeyResult *PasskeyResult `json:"passkey_result,omitempty"`
+	Error         string         `json:"error,omitempty"`
+}
+
+func (r Request) SubjectItemID() string {
+	if r.Kind == KindPasskey && r.Passkey != nil {
+		return r.Passkey.ItemID
+	}
+	return r.Fill.ItemID
+}
+
+func (r Request) SubjectItemName() string {
+	if r.Kind == KindPasskey && r.Passkey != nil {
+		return r.Passkey.ItemName
+	}
+	return r.Fill.ItemName
+}
+
+func (r Request) SubjectSession() string {
+	if r.Kind == KindPasskey && r.Passkey != nil {
+		return r.Passkey.Session
+	}
+	return r.Fill.Session
+}
+
+func (r Request) SubjectOrigin() string {
+	if r.Kind == KindPasskey && r.Passkey != nil {
+		return r.Passkey.Origin
+	}
+	return r.Fill.Origin
+}
+
+func (r Request) SubjectURIs() []string {
+	if r.Kind == KindPasskey && r.Passkey != nil {
+		return r.Passkey.ItemURIs
+	}
+	return r.Fill.ItemURIs
 }
 
 type Status struct {

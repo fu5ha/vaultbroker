@@ -26,7 +26,9 @@ func New(baseURL, token string) *Client {
 	return &Client{
 		baseURL: baseURL,
 		token:   token,
-		http:    &http.Client{Timeout: 30 * time.Second},
+		// A passkey login waits on the site's ceremony, so the
+		// timeout has to cover a slow page, not just helper time.
+		http: &http.Client{Timeout: 90 * time.Second},
 	}
 }
 
@@ -97,6 +99,42 @@ func (c *Client) CurrentOrigin(ctx context.Context, session string) (string, err
 		return "", err
 	}
 	return out.Origin, nil
+}
+
+// PasskeyCredential is one credential in CDP WebAuthn.addCredential
+// shape. PrivateKey crosses this boundary only inside one approved
+// Passkey call, like fill values.
+type PasskeyCredential struct {
+	CredentialID         string `json:"credentialId"`
+	IsResidentCredential bool   `json:"isResidentCredential"`
+	RPID                 string `json:"rpId"`
+	PrivateKey           string `json:"privateKey"`
+	UserHandle           string `json:"userHandle,omitempty"`
+	SignCount            int    `json:"signCount"`
+	BackupEligibility    bool   `json:"backupEligibility"`
+	BackupState          bool   `json:"backupState"`
+	UserName             string `json:"userName,omitempty"`
+	UserDisplayName      string `json:"userDisplayName,omitempty"`
+}
+
+type PasskeyTrigger struct {
+	Selector string `json:"selector,omitempty"`
+	Ref      string `json:"ref,omitempty"`
+}
+
+type PasskeyResult struct {
+	CeremonyRPID string `json:"ceremony_rp_id"`
+}
+
+// Passkey runs one approved passkey login: the helper clicks the
+// trigger, catches the site's WebAuthn ceremony, loads the credential
+// into a virtual authenticator long enough for that ceremony, and
+// removes it before returning.
+func (c *Client) Passkey(ctx context.Context, session, expectedOrigin string, trigger PasskeyTrigger, credential PasskeyCredential) (PasskeyResult, error) {
+	var out PasskeyResult
+	err := c.call(ctx, http.MethodPost, "/services/"+session+"/vault-passkey",
+		map[string]any{"expected_origin": expectedOrigin, "trigger": trigger, "credential": credential}, &out)
+	return out, err
 }
 
 func (c *Client) Fill(ctx context.Context, session, expectedOrigin string, assignments []FillAssignment) ([]AssignmentResult, error) {
